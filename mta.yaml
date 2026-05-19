@@ -1,0 +1,66 @@
+_schema-version: 3.3.0
+ID: atc-run-monitor
+version: 1.0.0
+description: ATC Central Monitoring Dashboard
+
+parameters:
+  enable-parallel-deployments: true
+
+build-parameters:
+  before-all:
+    - builder: custom
+      commands:
+        - npm ci
+        - npm run build
+        - npm run copy-to-router
+        - npx cds build --production
+        - node -e "require('fs').copyFileSync('db.sqlite','gen/srv/db.sqlite')"
+        - node -e "require('fs').writeFileSync('gen/srv/.mtaignore','node_modules/')"
+
+modules:
+
+  - name: atc-run-monitor-srv
+    type: nodejs
+    path: gen/srv
+    parameters:
+      memory: 512M
+      disk-quota: 512M
+      instances: 1
+    build-parameters:
+      builder: npm-ci
+    provides:
+      - name: srv-api
+        properties:
+          srv-url: ${default-url}
+    requires:
+      - name: atc-run-monitor-auth
+
+  - name: atc-run-monitor-router
+    type: approuter.nodejs
+    path: app/router
+    parameters:
+      memory: 256M
+      disk-quota: 1024M
+      keep-existing-routes: true
+    build-parameters:
+      builder: npm-ci
+    requires:
+      - name: srv-api
+        group: destinations
+        properties:
+          name: srv-api
+          url: ~{srv-url}
+          forwardAuthToken: true
+      - name: atc-run-monitor-auth
+
+resources:
+
+  - name: atc-run-monitor-auth
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      path: ./xs-security.json
+      config:
+        xsappname: atc-run-monitor-v2
+        tenant-mode: dedicated

@@ -1,0 +1,54 @@
+{
+  "name": "atc-run-monitor",
+  "private": true,
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vite --port=3000 --host=0.0.0.0",
+    "backend": "cds watch",
+    "dev:full": "concurrently \"npm run backend\" \"npm run dev\"",
+    "build": "vite build",
+    "copy-to-router": "node -e \"const fs=require('fs');const src='dist';const dst='app/router/resources';if(fs.existsSync(dst))fs.rmSync(dst,{recursive:true});fs.cpSync(src,dst,{recursive:true});console.log('Copied.')\"",
+    "start": "cds-serve",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cap-js/sqlite": "^2.2.1",
+    "@sap/cds": "^9.9.0",
+    "@sap/xssec": "^4.13.0",
+    "axios": "^1.16.1",
+    "fast-xml-parser": "^5.8.0",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.38.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "recharts": "^3.8.1"
+  },
+  "devDependencies": {
+    "@sap/cds-dk": "^9.9.0",
+    "@tailwindcss/vite": "^4.2.4",
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
+    "tailwindcss": "^4.2.4",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2",
+    "vite": "^8.0.10"
+  },
+  "cds": {
+    "folders": {
+      "db": "db",
+      "srv": "srv"
+    },
+    "requires": {
+      "db": {
+        "kind": "sqlite",
+        "credentials": {
+          "database": "db.sqlite"
+        }
+      }
+    }
+  }
+}

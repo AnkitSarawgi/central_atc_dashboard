@@ -1,0 +1,47 @@
+{
+  "xsappname": "atc-run-monitor-v2",
+  "tenant-mode": "dedicated",
+  "scopes": [
+    {
+      "name": "$XSAPPNAME.ATCViewer",
+      "description": "View ATC Run Monitor Dashboard"
+    },
+    {
+      "name": "$XSAPPNAME.ATCAdmin",
+      "description": "Administer ATC Run Monitor"
+    }
+  ],
+  "role-templates": [
+    {
+      "name": "ATCViewer",
+      "description": "ATC Run Monitor - View Only",
+      "scope-references": ["$XSAPPNAME.ATCViewer"],
+      "attribute-references": []
+    },
+    {
+      "name": "ATCAdmin",
+      "description": "ATC Run Monitor - Administrator",
+      "scope-references": ["$XSAPPNAME.ATCViewer", "$XSAPPNAME.ATCAdmin"],
+      "attribute-references": []
+    }
+  ],
+  "role-collections": [
+    {
+      "name": "ATC Run Monitor - Viewer",
+      "description": "Read-only access to ATC Run Monitor",
+      "role-template-references": ["$XSAPPNAME.ATCViewer"]
+    },
+    {
+      "name": "ATC Run Monitor - Admin",
+      "description": "Full access to ATC Run Monitor",
+      "role-template-references": ["$XSAPPNAME.ATCViewer", "$XSAPPNAME.ATCAdmin"]
+    }
+  ],
+  "oauth2-configuration": {
+    "token-validity": 43200,
+    "refresh-token-validity": 604800,
+    "redirect-uris": [
+      "https://*.cfapps.eu20-002.hana.ondemand.com/**"
+    ]
+  }
+}

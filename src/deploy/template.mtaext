@@ -1,0 +1,8 @@
+_schema-version: 3.3.0
+ID: atc-run-monitor-<env-name>      # ← change this
+extends: atc-run-monitor
+
+resources:
+  - name: atc-abap-service
+    parameters:
+      service-name: <abap-service-name>   # ← find with: cf services

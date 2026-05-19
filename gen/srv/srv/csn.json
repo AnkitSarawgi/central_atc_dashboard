@@ -1,0 +1,258 @@
+{
+  "definitions": {
+    "atc_Run": {
+      "kind": "entity",
+      "elements": {
+        "ID": {
+          "key": true,
+          "type": "cds.UUID"
+        },
+        "series": {
+          "type": "cds.String"
+        },
+        "user": {
+          "type": "cds.String"
+        },
+        "system": {
+          "type": "cds.String"
+        },
+        "title": {
+          "type": "cds.String"
+        },
+        "date": {
+          "type": "cds.String"
+        },
+        "p1": {
+          "type": "cds.Integer"
+        },
+        "p2": {
+          "type": "cds.Integer"
+        },
+        "p3": {
+          "type": "cds.Integer"
+        }
+      }
+    },
+    "ATCService": {
+      "@source": "srv/service.cds",
+      "kind": "service",
+      "@path": "/odata/v4/atc",
+      "@requires": "any"
+    },
+    "ATCService.Runs": {
+      "kind": "entity",
+      "@readonly": true,
+      "projection": {
+        "from": {
+          "ref": [
+            "atc_Run"
+          ]
+        }
+      },
+      "elements": {
+        "ID": {
+          "key": true,
+          "type": "cds.UUID"
+        },
+        "series": {
+          "type": "cds.String"
+        },
+        "user": {
+          "type": "cds.String"
+        },
+        "system": {
+          "type": "cds.String"
+        },
+        "title": {
+          "type": "cds.String"
+        },
+        "date": {
+          "type": "cds.String"
+        },
+        "p1": {
+          "type": "cds.Integer"
+        },
+        "p2": {
+          "type": "cds.Integer"
+        },
+        "p3": {
+          "type": "cds.Integer"
+        }
+      }
+    },
+    "ATCService.Trend": {
+      "kind": "entity",
+      "@readonly": true,
+      "elements": {
+        "date": {
+          "key": true,
+          "type": "cds.String"
+        },
+        "p1": {
+          "type": "cds.Integer"
+        },
+        "p2": {
+          "type": "cds.Integer"
+        },
+        "p3": {
+          "type": "cds.Integer"
+        }
+      }
+    },
+    "ATCService.Radar": {
+      "kind": "entity",
+      "@readonly": true,
+      "elements": {
+        "subject": {
+          "key": true,
+          "type": "cds.String"
+        },
+        "value": {
+          "type": "cds.Integer"
+        }
+      }
+    },
+    "ATCService.SLA": {
+      "kind": "entity",
+      "@readonly": true,
+      "elements": {
+        "name": {
+          "key": true,
+          "type": "cds.String"
+        },
+        "value": {
+          "type": "cds.Integer"
+        }
+      }
+    },
+    "ATCService.OverviewKPI": {
+      "kind": "entity",
+      "@readonly": true,
+      "elements": {
+        "ID": {
+          "key": true,
+          "type": "cds.UUID"
+        },
+        "p1": {
+          "type": "cds.Integer"
+        },
+        "p2": {
+          "type": "cds.Integer"
+        },
+        "p3": {
+          "type": "cds.Integer"
+        },
+        "health": {
+          "type": "cds.Integer"
+        }
+      }
+    },
+    "ATCService.CategoryStats": {
+      "kind": "entity",
+      "@readonly": true,
+      "elements": {
+        "name": {
+          "key": true,
+          "type": "cds.String"
+        },
+        "value": {
+          "type": "cds.Integer"
+        }
+      }
+    },
+    "ATCService.RunSeriesStats": {
+      "kind": "entity",
+      "@readonly": true,
+      "elements": {
+        "name": {
+          "key": true,
+          "type": "cds.String"
+        },
+        "value": {
+          "type": "cds.Integer"
+        }
+      }
+    },
+    "ATCService.QualityTrend": {
+      "kind": "entity",
+      "@readonly": true,
+      "elements": {
+        "date": {
+          "key": true,
+          "type": "cds.String"
+        },
+        "score": {
+          "type": "cds.Integer"
+        }
+      }
+    },
+    "ATCService.Heatmap": {
+      "kind": "entity",
+      "@readonly": true,
+      "elements": {
+        "ID": {
+          "key": true,
+          "type": "cds.UUID"
+        },
+        "value": {
+          "type": "cds.Integer"
+        }
+      }
+    },
+    "cds.outbox.Messages": {
+      "kind": "entity",
+      "elements": {
+        "ID": {
+          "key": true,
+          "type": "cds.UUID"
+        },
+        "timestamp": {
+          "type": "cds.Timestamp"
+        },
+        "target": {
+          "type": "cds.String"
+        },
+        "msg": {
+          "type": "cds.LargeString"
+        },
+        "attempts": {
+          "type": "cds.Integer",
+          "default": {
+            "val": 0
+          }
+        },
+        "partition": {
+          "type": "cds.Integer",
+          "default": {
+            "val": 0
+          }
+        },
+        "lastError": {
+          "type": "cds.LargeString"
+        },
+        "lastAttemptTimestamp": {
+          "type": "cds.Timestamp"
+        },
+        "status": {
+          "type": "cds.String",
+          "length": 23
+        },
+        "task": {
+          "type": "cds.String",
+          "length": 255
+        },
+        "appid": {
+          "type": "cds.String",
+          "length": 255
+        }
+      }
+    }
+  },
+  "meta": {
+    "creator": "CDS Compiler v6.9.0",
+    "compilerVersion": "6.9.0",
+    "compilerCsnFlavor": "inferred",
+    "flavor": "inferred"
+  },
+  "$version": "2.0"
+}
