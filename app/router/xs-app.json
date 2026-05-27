@@ -3,6 +3,14 @@
   "authenticationMethod": "route",
   "routes": [
     {
+      "source": "^/sap/opu/(.*)$",
+      "target": "/sap/opu/$1",
+      "destination": "nw-atc-dest",
+      "authenticationType": "none",
+      "csrfProtection": false,
+      "httpMethods": ["GET", "HEAD", "OPTIONS"]
+    },
+    {
       "source": "^/odata/(.*)$",
       "target": "/odata/$1",
       "destination": "srv-api",
