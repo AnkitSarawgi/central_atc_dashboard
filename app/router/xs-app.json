@@ -7,16 +7,14 @@
       "target": "/sap/opu/$1",
       "destination": "nw-atc-dest",
       "authenticationType": "none",
-      "csrfProtection": false,
-      "httpMethods": ["GET", "HEAD", "OPTIONS"]
+      "csrfProtection": false
     },
     {
       "source": "^/odata/(.*)$",
       "target": "/odata/$1",
       "destination": "srv-api",
       "authenticationType": "none",
-      "csrfProtection": false,
-      "httpMethods": ["GET", "HEAD", "OPTIONS"]
+      "csrfProtection": false
     },
     {
       "source": "^/index.html$",

@@ -2,6 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------- ANIMATIONS ---------- */
+
+@keyframes spin {
+  to { 
+    transform: rotate(360deg); 
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { 
+    opacity: 1;
+    transform: scaleX(1);
+  }
+  50% { 
+    opacity: 0.8;
+    transform: scaleX(0.95);
+  }
+}
+
 /* ---------- THEMES ---------- */
 
 :root {
@@ -519,6 +538,15 @@ body {
   color: #4b5563;
 }
 
+/* STICKY FILTER */
+.filter-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  padding-bottom: 8px;
+}
+
 /* =========================
    RESPONSIVE
 ========================= */
@@ -633,3 +661,23 @@ body {
     padding: 14px;
   }
 }
+
+/* ---- P4 additions — appended, nothing above altered ---- */
+
+/* Badge for P4 (Note) column in Run Explorer table */
+.badge-grey {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+/* Severity bar segment for P4 */
+.sev-grey { background: #9ca3af; }
