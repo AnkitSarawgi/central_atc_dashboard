@@ -10,12 +10,10 @@ build-parameters:
   before-all:
     - builder: custom
       commands:
-        - npm ci
         - npm run build
         - npm run copy-to-router
         - npx cds build --production
         - node -e "require('fs').copyFileSync('db.sqlite','gen/srv/db.sqlite')"
-        - node -e "require('fs').writeFileSync('gen/srv/.mtaignore','node_modules/')"
 
 modules:
 
@@ -52,6 +50,8 @@ modules:
           url: ~{srv-url}
           forwardAuthToken: true
       - name: atc-run-monitor-auth
+      - name: atc-run-monitor-dest
+      - name: atc-run-monitor-connectivity
 
 resources:
 
@@ -64,3 +64,15 @@ resources:
       config:
         xsappname: atc-run-monitor-v2
         tenant-mode: dedicated
+
+  - name: atc-run-monitor-dest
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
+      service-plan: lite
+
+  - name: atc-run-monitor-connectivity
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: connectivity
+      service-plan: lite
