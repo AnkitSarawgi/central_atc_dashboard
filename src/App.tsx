@@ -1715,6 +1715,128 @@ export default function App() {
     [checkRegistry, assignments],
   );
 
+  const currentProductContext = useMemo(() => {
+    if (!selectedRun?.series) return null;
+    const seriesEntry = productRunSeries.find(
+      (s: any) =>
+        (s.RunSeries || "").toUpperCase() ===
+        (selectedRun.series || "").toUpperCase(),
+    );
+    if (!seriesEntry?.ProductId) return null;
+    const product = products.find(
+      (p: any) =>
+        (p.ProductId || "").toUpperCase() ===
+        (seriesEntry.ProductId || "").toUpperCase(),
+    );
+    return {
+      productId: seriesEntry.ProductId,
+      seriesEntry,
+      product,
+      jiraProjectKey: (product?.JiraProjectKey || "").trim(),
+    };
+  }, [selectedRun?.series, productRunSeries, products]);
+
+  const getConfigValue = useCallback(
+    (productId: string, key: string, fallback = ""): string => {
+      const normKey = key.toUpperCase();
+      const normProduct = (productId || "").toUpperCase();
+      const productValue = integrationConfig.find(
+        (c: any) =>
+          (c.ProductId || "").toUpperCase() === normProduct &&
+          (c.ConfigKey || "").toUpperCase() === normKey,
+      );
+      const globalValue = integrationConfig.find(
+        (c: any) =>
+          (c.ProductId || "").toUpperCase() === "GLOBAL" &&
+          (c.ConfigKey || "").toUpperCase() === normKey,
+      );
+      return String(productValue?.ConfigValue || globalValue?.ConfigValue || fallback);
+    },
+    [integrationConfig],
+  );
+
+  const getAssignmentFindings = useCallback(
+    (assignmentType: "CHECK" | "PACKAGE", assignmentKey: string): any[] => {
+      if (assignmentType === "PACKAGE") {
+        return findings.filter((f) => (f.PackageName || "Unassigned") === assignmentKey);
+      }
+      return findings.filter(
+        (f) => (f.CheckCategory || resolveCheckCategory(f)) === assignmentKey,
+      );
+    },
+    [findings, resolveCheckCategory],
+  );
+
+  const getJiraTicket = useCallback(
+    (assignmentType: "CHECK" | "PACKAGE", assignmentKey: string) =>
+      jiraTickets.find(
+        (t: any) =>
+          t.AssignmentType === assignmentType && t.AssignmentKey === assignmentKey,
+      ),
+    [jiraTickets],
+  );
+
+  const getJiraIssueUrl = useCallback(
+    (issueKey: string, productId?: string): string => {
+      if (!issueKey) return "";
+      const base = getConfigValue(
+        productId || currentProductContext?.productId || "",
+        "JiraBaseUrl",
+      );
+      return base ? `${base.replace(/\/+$/, "")}/browse/${encodeURIComponent(issueKey)}` : "";
+    },
+    [currentProductContext?.productId, getConfigValue],
+  );
+
+  const renderJiraTicketBadge = useCallback(
+    (assignmentType: "CHECK" | "PACKAGE", assignmentKey: string) => {
+      const ticket = getJiraTicket(assignmentType, assignmentKey);
+      if (!ticket) return null;
+      const issueKey = ticket.JiraIssueKey || "";
+      if (!issueKey) {
+        return (
+          <span
+            style={{
+              fontSize: 10,
+              color: "#92400e",
+              background: "#fffbeb",
+              border: "1px solid #fde047",
+              borderRadius: 999,
+              padding: "1px 7px",
+              fontWeight: 700,
+            }}
+          >
+            Jira pending
+          </span>
+        );
+      }
+      const href = getJiraIssueUrl(issueKey, ticket.ProductId);
+      const badge = (
+        <span
+          style={{
+            fontSize: 10,
+            color: "#0a6ed1",
+            background: "#eff6ff",
+            border: "1px solid #bfdbfe",
+            borderRadius: 999,
+            padding: "1px 7px",
+            fontWeight: 700,
+          }}
+        >
+          Jira {issueKey}
+        </span>
+      );
+      return href ? (
+        <a href={href} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+          {badge}
+        </a>
+      ) : (
+        badge
+      );
+    },
+    [getJiraIssueUrl, getJiraTicket],
+  );
+
   // ── Security computed ───────────────────────────────────────────────────────
   const securityClassified = securityModuleIds.size > 0;
   const isCheckmanRun = selectedRun?.RunKind === "M";
@@ -2330,6 +2452,178 @@ export default function App() {
     [connection, connections],
   );
   // ── Check & Package Assignment OData helpers ────────────────────────────────
+  const odataKey = (v: any) =>
+    encodeURIComponent(String(v ?? "").replace(/'/g, "''"));
+
+  const buildJiraPayload = useCallback(
+    (
+      assignmentType: "CHECK" | "PACKAGE",
+      assignmentKey: string,
+      assignedUserId: string,
+    ) => {
+      if (!selectedRun || !currentProductContext) {
+        throw new Error("No selected run/product context for Jira ticket.");
+      }
+      if (!currentProductContext.jiraProjectKey) {
+        throw new Error(
+          `Jira project key is missing for product ${currentProductContext.productId}.`,
+        );
+      }
+
+      const rows = getAssignmentFindings(assignmentType, assignmentKey);
+      const p1 = rows.filter((f) => Number(f.Priority) === 1).length;
+      const p2 = rows.filter((f) => Number(f.Priority) === 2).length;
+      const p3 = rows.filter((f) => Number(f.Priority) === 3).length;
+      const p4 = rows.filter((f) => Number(f.Priority) === 4).length;
+      const label =
+        assignmentType === "CHECK"
+          ? resolveCheckCategory(rows[0] || { CheckCategory: assignmentKey }) ||
+            assignmentKey
+          : `Package ${assignmentKey}`;
+      const title = `[ATC] ${assignmentType === "CHECK" ? "Check" : "Package"} ${label} - ${rows.length} finding${rows.length === 1 ? "" : "s"}`;
+      const objectList = [
+        ...new Set(rows.map((f) => f.ObjectName).filter(Boolean)),
+      ].slice(0, 20);
+      const issueType = getConfigValue(
+        currentProductContext.productId,
+        "JiraIssueType",
+        "",
+      );
+      const priorityName =
+        p1 > 0
+          ? getConfigValue(currentProductContext.productId, "JiraPriorityP1", "")
+          : p2 > 0
+            ? getConfigValue(currentProductContext.productId, "JiraPriorityP2", "")
+            : "";
+      const labels = [
+        getConfigValue(
+          currentProductContext.productId,
+          "JiraLabels",
+          "atc,atc-monitor",
+        ),
+        assignmentType.toLowerCase(),
+        currentProductContext.productId,
+      ]
+        .filter(Boolean)
+        .join(",");
+      const description = [
+        "ATC remediation ticket created from ATC Run Monitor.",
+        "",
+        `Run: ${selectedRun.title || selectedRun.series || selectedRun.ID}`,
+        `Run ID: ${selectedRun.ID}`,
+        `Run series: ${selectedRun.series || "-"}`,
+        `System: ${selectedRun.system || "-"}`,
+        `Run date: ${selectedRun.date || "-"}`,
+        `Product: ${currentProductContext.productId}`,
+        `Assignment: ${assignmentType} / ${assignmentKey}`,
+        `Assigned owner: ${assignedUserId}`,
+        "",
+        `Findings: ${rows.length} total | P1 ${p1} | P2 ${p2} | P3 ${p3} | P4 ${p4}`,
+        "",
+        objectList.length ? "Affected objects:" : "Affected objects: none found",
+        ...objectList.map((obj) => `- ${obj}`),
+        rows.length > objectList.length
+          ? `- ...and ${rows.length - objectList.length} more finding rows`
+          : "",
+      ]
+        .filter((line) => line !== "")
+        .join("\n");
+
+      return {
+        projectKey: currentProductContext.jiraProjectKey,
+        issueType,
+        summary: title,
+        description,
+        labels,
+        priorityName,
+        assigneeAccountId: "",
+      };
+    },
+    [
+      currentProductContext,
+      getAssignmentFindings,
+      getConfigValue,
+      resolveCheckCategory,
+      selectedRun,
+    ],
+  );
+
+  const raiseJiraIssue = useCallback(async (payload: any) => {
+    const r = await fetch("/odata/v4/atc/raiseJiraTicket", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      throw new Error(data?.error?.message || `HTTP ${r.status}`);
+    }
+    const result = data?.value || data;
+    if (!result?.issueKey) {
+      throw new Error("Jira did not return an issue key.");
+    }
+    return result;
+  }, []);
+
+  const ensureJiraTicketRecord = useCallback(
+    async (
+      base: string,
+      token: string,
+      productId: string,
+      runSeries: string,
+      run: Run,
+      assignmentType: "CHECK" | "PACKAGE",
+      assignmentKey: string,
+      assignedUserId: string,
+    ): Promise<{ issueKey: string; created: boolean }> => {
+      const existing = getJiraTicket(assignmentType, assignmentKey);
+      if (existing?.JiraIssueKey) {
+        return { issueKey: existing.JiraIssueKey, created: false };
+      }
+
+      const issue = await raiseJiraIssue(
+        buildJiraPayload(assignmentType, assignmentKey, assignedUserId),
+      );
+      const body = {
+        ProductId: productId,
+        RunSeries: runSeries,
+        RunId: run.ID,
+        AssignmentType: assignmentType,
+        AssignmentKey: assignmentKey,
+        JiraIssueKey: issue.issueKey,
+        AssignedUserId: assignedUserId,
+        RunDate: run.date || "",
+      };
+      const headers = {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": token,
+      };
+      const keyPath = `${base}/JiraTickets(ProductId='${odataKey(productId)}',RunSeries='${odataKey(runSeries)}',RunId='${odataKey(run.ID)}',AssignmentType='${assignmentType}',AssignmentKey='${odataKey(assignmentKey)}')`;
+      const write = existing
+        ? await fetch(keyPath, {
+            method: "PATCH",
+            headers,
+            body: JSON.stringify({
+              JiraIssueKey: issue.issueKey,
+              AssignedUserId: assignedUserId,
+              RunDate: run.date || "",
+            }),
+          })
+        : await fetch(`${base}/JiraTickets`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(body),
+          });
+
+      if (!write.ok) {
+        throw new Error(`Jira ticket tracking update failed: HTTP ${write.status}`);
+      }
+
+      return { issueKey: issue.issueKey, created: true };
+    },
+    [buildJiraPayload, getJiraTicket, raiseJiraIssue],
+  );
+
   const fetchAssignments = useCallback(
     async (run: Run) => {
       if (!run.series || connection !== "netweaver") return;
@@ -2420,6 +2714,8 @@ export default function App() {
         csrfR.headers.get("X-CSRF-Token") ||
         "";
       const errors: string[] = [];
+      let jiraCreated = 0;
+      let jiraExisting = 0;
 
       for (const [checkCategory, assignedUserId] of Object.entries(
         assignments,
@@ -2427,6 +2723,7 @@ export default function App() {
         const existing = checkAssignments.find(
           (r) => r.CheckCategory === checkCategory,
         );
+        let assignmentSaved = false;
         if (existing) {
           const r = await fetch(
             `${base}/CheckAssignments(ProductId='${productId}',RunSeries='${runSeries}',RunId='${selectedRun.ID}',CheckCategory='${encodeURIComponent(checkCategory)}')`,
@@ -2441,6 +2738,7 @@ export default function App() {
           );
           if (!r.ok)
             errors.push(`PATCH failed for ${checkCategory}: HTTP ${r.status}`);
+          else assignmentSaved = true;
         } else {
           const r = await fetch(`${base}/CheckAssignments`, {
             method: "POST",
@@ -2459,31 +2757,27 @@ export default function App() {
           if (!r.ok) {
             errors.push(`POST failed for ${checkCategory}: HTTP ${r.status}`);
           } else {
-            // Create JIRA ticket tracking record
-            const ticketExists = jiraTickets.some(
-              (t) =>
-                t.AssignmentType === "CHECK" &&
-                t.AssignmentKey === checkCategory,
+            assignmentSaved = true;
+          }
+        }
+        if (assignmentSaved) {
+          try {
+            const jira = await ensureJiraTicketRecord(
+              base,
+              token,
+              productId,
+              runSeries,
+              selectedRun,
+              "CHECK",
+              checkCategory,
+              assignedUserId,
             );
-            if (!ticketExists) {
-              await fetch(`${base}/JiraTickets`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "X-CSRF-Token": token,
-                },
-                body: JSON.stringify({
-                  ProductId: productId,
-                  RunSeries: runSeries,
-                  RunId: selectedRun.ID,
-                  AssignmentType: "CHECK",
-                  AssignmentKey: checkCategory,
-                  JiraIssueKey: "",
-                  AssignedUserId: assignedUserId,
-                  RunDate: selectedRun.date || "",
-                }),
-              });
-            }
+            if (jira.created) jiraCreated++;
+            else if (jira.issueKey) jiraExisting++;
+          } catch (e: any) {
+            errors.push(
+              `Jira failed for ${checkCategory}: ${e?.message || "unknown error"}`,
+            );
           }
         }
       }
@@ -2499,9 +2793,13 @@ export default function App() {
             );
         }
       }
-      if (errors.length > 0) setAssignmentsSaveError(errors.join(" | "));
-      else {
-        setAssignmentsSaveSuccess("Check assignments saved successfully.");
+      if (errors.length > 0) {
+        setAssignmentsSaveError(errors.join(" | "));
+        await fetchAssignments(selectedRun);
+      } else {
+        setAssignmentsSaveSuccess(
+          `Check assignments saved successfully. ${jiraCreated} Jira ticket${jiraCreated === 1 ? "" : "s"} created${jiraExisting ? `, ${jiraExisting} already linked` : ""}.`,
+        );
         await fetchAssignments(selectedRun);
       }
     } catch (e: any) {
@@ -2518,8 +2816,7 @@ export default function App() {
     connections,
     productRunSeries,
     fetchAssignments,
-    findings,
-    resolveCheckCategory,
+    ensureJiraTicketRecord,
   ]);
 
   const savePackageAssignments = useCallback(async () => {
@@ -2548,6 +2845,8 @@ export default function App() {
         csrfR.headers.get("X-CSRF-Token") ||
         "";
       const errors: string[] = [];
+      let jiraCreated = 0;
+      let jiraExisting = 0;
 
       for (const [packageName, assignedUserId] of Object.entries(
         packageAssignments,
@@ -2555,6 +2854,7 @@ export default function App() {
         const existing = pkgAssignmentsBackend.find(
           (r) => r.PackageName === packageName,
         );
+        let assignmentSaved = false;
         if (existing) {
           const r = await fetch(
             `${base}/PackageAssignments(ProductId='${productId}',RunSeries='${runSeries}',RunId='${selectedRun.ID}',PackageName='${encodeURIComponent(packageName)}')`,
@@ -2569,6 +2869,7 @@ export default function App() {
           );
           if (!r.ok)
             errors.push(`PATCH failed for ${packageName}: HTTP ${r.status}`);
+          else assignmentSaved = true;
         } else {
           const r = await fetch(`${base}/PackageAssignments`, {
             method: "POST",
@@ -2587,31 +2888,27 @@ export default function App() {
           if (!r.ok) {
             errors.push(`POST failed for ${packageName}: HTTP ${r.status}`);
           } else {
-            // Create JIRA ticket tracking record
-            const ticketExists = jiraTickets.some(
-              (t) =>
-                t.AssignmentType === "PACKAGE" &&
-                t.AssignmentKey === packageName,
+            assignmentSaved = true;
+          }
+        }
+        if (assignmentSaved) {
+          try {
+            const jira = await ensureJiraTicketRecord(
+              base,
+              token,
+              productId,
+              runSeries,
+              selectedRun,
+              "PACKAGE",
+              packageName,
+              assignedUserId,
             );
-            if (!ticketExists) {
-              await fetch(`${base}/JiraTickets`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "X-CSRF-Token": token,
-                },
-                body: JSON.stringify({
-                  ProductId: productId,
-                  RunSeries: runSeries,
-                  RunId: selectedRun.ID,
-                  AssignmentType: "PACKAGE",
-                  AssignmentKey: packageName,
-                  JiraIssueKey: "",
-                  AssignedUserId: assignedUserId,
-                  RunDate: selectedRun.date || "",
-                }),
-              });
-            }
+            if (jira.created) jiraCreated++;
+            else if (jira.issueKey) jiraExisting++;
+          } catch (e: any) {
+            errors.push(
+              `Jira failed for ${packageName}: ${e?.message || "unknown error"}`,
+            );
           }
         }
       }
@@ -2627,9 +2924,13 @@ export default function App() {
             );
         }
       }
-      if (errors.length > 0) setPkgSaveError(errors.join(" | "));
-      else {
-        setPkgSaveSuccess("Package assignments saved successfully.");
+      if (errors.length > 0) {
+        setPkgSaveError(errors.join(" | "));
+        await fetchAssignments(selectedRun);
+      } else {
+        setPkgSaveSuccess(
+          `Package assignments saved successfully. ${jiraCreated} Jira ticket${jiraCreated === 1 ? "" : "s"} created${jiraExisting ? `, ${jiraExisting} already linked` : ""}.`,
+        );
         await fetchAssignments(selectedRun);
       }
     } catch (e: any) {
@@ -2646,6 +2947,7 @@ export default function App() {
     connections,
     productRunSeries,
     fetchAssignments,
+    ensureJiraTicketRecord,
   ]);
   // ── Admin write helpers ─────────────────────────────────────────────────────
   const fetchCsrfToken = useCallback(async (): Promise<string> => {
@@ -9583,6 +9885,7 @@ tbody tr:nth-child(even){background:#f8fafc;}tbody td{padding:7px 10px;border-bo
                                 {pkg.objectCount} obj · {pkg.checkTypeCount}{" "}
                                 checks
                               </span>
+                              {renderJiraTicketBadge("PACKAGE", pkg.key)}
                             </div>
                           </div>
                           <div style={{ flexShrink: 0 }}>
@@ -9685,9 +9988,7 @@ tbody tr:nth-child(even){background:#f8fafc;}tbody td{padding:7px 10px;border-bo
                             pkgSaving || !selectedRun ? "default" : "pointer",
                         }}
                       >
-                        {pkgSaving
-                          ? "Saving..."
-                          : "💾 Save Package Assignments"}
+                        {pkgSaving ? "Saving..." : "Save + Create Jira Tickets"}
                       </button>
                     </div>
                     <div
@@ -9791,6 +10092,7 @@ tbody tr:nth-child(even){background:#f8fafc;}tbody td{padding:7px 10px;border-bo
                               <span style={{ fontSize: 10, color: "#9ca3af" }}>
                                 {pkg.objectCount} objects
                               </span>
+                              {renderJiraTicketBadge("PACKAGE", pkg.key)}
                             </div>
                           </div>
                           <select
@@ -10266,6 +10568,7 @@ tbody tr:nth-child(even){background:#f8fafc;}tbody td{padding:7px 10px;border-bo
                                   >
                                     {c.objectCount} obj
                                   </span>
+                                  {renderJiraTicketBadge("CHECK", c.key)}
                                 </div>
                               </div>
                               <div style={{ flexShrink: 0 }}>
@@ -10439,7 +10742,7 @@ tbody tr:nth-child(even){background:#f8fafc;}tbody td{padding:7px 10px;border-bo
                       >
                         {assignmentsSaving
                           ? "Saving..."
-                          : "💾 Save Check Assignments"}
+                          : "Save + Create Jira Tickets"}
                       </button>
                     </div>
                     <div
@@ -10571,6 +10874,7 @@ tbody tr:nth-child(even){background:#f8fafc;}tbody td{padding:7px 10px;border-bo
                               <span style={{ fontSize: 10, color: "#9ca3af" }}>
                                 {c.objectCount} objects
                               </span>
+                              {renderJiraTicketBadge("CHECK", c.key)}
                             </div>
                           </div>
                           <select

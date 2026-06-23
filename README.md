@@ -18,3 +18,9 @@ View your app in AI Studio: https://ai.studio/apps/556121a5-757e-4a13-9355-47d6d
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Jira integration
+
+Jira ticket creation runs through the CAP service, not from the browser. Set `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, and optionally `JIRA_DEFAULT_ISSUE_TYPE` in the service environment.
+
+In the app admin data, keep `Products.JiraProjectKey` populated for each product. `IntegrationConfig` can contain non-secret values such as `GLOBAL / JiraBaseUrl`, `GLOBAL / JiraIssueType`, and comma-separated `GLOBAL / JiraLabels`.

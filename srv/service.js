@@ -1,5 +1,6 @@
 const cds = require("@sap/cds");
 const { SELECT } = cds.ql;
+const { createJiraIssue } = require("./jira");
 
 const Runs = 'atc_Run';
 
@@ -21,6 +22,14 @@ const buildQuery = (entity, where) => {
 };
 
 module.exports = cds.service.impl(function () {
+
+  this.on("raiseJiraTicket", async (req) => {
+    try {
+      return await createJiraIssue(req.data || {});
+    } catch (err) {
+      req.error(502, err.message);
+    }
+  });
 
   this.on("READ", "Runs", async (req) => {
     try {

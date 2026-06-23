@@ -50,4 +50,22 @@ service ATCService {
     key ID    : UUID;
         value : Integer;
   }
+
+  type JiraTicketResult {
+    ok       : Boolean;
+    issueId  : String;
+    issueKey : String;
+    issueUrl : String;
+    message  : String;
+  }
+
+  action raiseJiraTicket(
+    projectKey        : String,
+    issueType         : String,
+    summary           : String,
+    description       : LargeString,
+    labels            : String,
+    priorityName      : String,
+    assigneeAccountId : String
+  ) returns JiraTicketResult;
 }
