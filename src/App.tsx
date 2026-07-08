@@ -518,7 +518,13 @@ export default function App() {
   const [fixCache, setFixCache] = useState<Map<string, string>>(new Map());
   const [fixLoadingKey, setFixLoadingKey] = useState("");
   const [checkAssignments, setCheckAssignments] = useState<any[]>([]);
-  const [pkgAssignmentsBackend, setPkgAssignmentsBackend] = useState<any[]>([]);
+ const [pkgAssignmentsBackend, setPkgAssignmentsBackend] = useState<any[]>([]);
+  const [expandedPkgForAssign, setExpandedPkgForAssign] = useState<string | null>(null);
+  const [pkgCheckAssignments, setPkgCheckAssignments] = useState<Record<string, string>>({});
+  const [pkgCheckAssignmentsBackend, setPkgCheckAssignmentsBackend] = useState<any[]>([]);
+  const [pkgCheckSaving, setPkgCheckSaving] = useState(false);
+  const [pkgCheckSaveError, setPkgCheckSaveError] = useState("");
+  const [pkgCheckSaveSuccess, setPkgCheckSaveSuccess] = useState("");
   const [jiraTickets, setJiraTickets] = useState<any[]>([]);
   const [assignmentsSaving, setAssignmentsSaving] = useState(false);
   const [assignmentsSaveError, setAssignmentsSaveError] = useState("");
@@ -1524,6 +1530,34 @@ export default function App() {
       .sort((a, b) => b.p1 - a.p1 || b.p2 - a.p2 || b.total - a.total);
   }, [findings, resolveCheckCategory]);
 
+  const pkgCheckRegistry = useMemo(() => {
+    const inner: Record<string, Record<string, {
+      p1: number; p2: number; p3: number; p4: number;
+      total: number; objects: Set<string>; checkKey: string; checkCat: string;
+    }>> = {};
+    findings.forEach((f) => {
+      const pkg = String(f.PackageName || "—");
+      const checkKey = f.CheckCategory || resolveCheckCategory(f);
+      const checkCat = resolveCheckCategory(f);
+      if (!inner[pkg]) inner[pkg] = {};
+      if (!inner[pkg][checkKey])
+        inner[pkg][checkKey] = { p1: 0, p2: 0, p3: 0, p4: 0, total: 0, objects: new Set(), checkKey, checkCat };
+      inner[pkg][checkKey].total++;
+      if (f.Priority === 1) inner[pkg][checkKey].p1++;
+      else if (f.Priority === 2) inner[pkg][checkKey].p2++;
+      else if (f.Priority === 3) inner[pkg][checkKey].p3++;
+      else if (f.Priority === 4) inner[pkg][checkKey].p4++;
+      if (f.ObjectName) inner[pkg][checkKey].objects.add(f.ObjectName);
+    });
+    const result: Record<string, { checkKey: string; checkCat: string; p1: number; p2: number; p3: number; p4: number; total: number; objectCount: number }[]> = {};
+    Object.entries(inner).forEach(([pkg, checks]) => {
+      result[pkg] = Object.values(checks)
+        .map((v) => ({ ...v, objectCount: v.objects.size }))
+        .sort((a, b) => b.p1 - a.p1 || b.p2 - a.p2 || b.total - a.total);
+    });
+    return result;
+  }, [findings, resolveCheckCategory]);
+
   const packageWorkload = useMemo(() => {
     const map: Record<
       string,
@@ -2388,6 +2422,24 @@ export default function App() {
       } catch (e) {
         console.error("Failed to fetch JIRA tickets:", e);
       }
+
+      try {
+        const url = `${base}/PackageCheckAssignments?$filter=ProductId eq '${productId}' and RunSeries eq '${runSeries}' and RunId eq '${run.ID}'`;
+        const r = await fetch(url);
+        if (r.ok) {
+          const j = await r.json();
+          const rows = j.value || [];
+          setPkgCheckAssignmentsBackend(rows);
+          const map: Record<string, string> = {};
+          rows.forEach((row: any) => {
+            if (row.PackageName && row.CheckCategory && row.AssignedUserId)
+              map[`${row.PackageName}|||${row.CheckCategory}`] = row.AssignedUserId;
+          });
+          setPkgCheckAssignments(map);
+        }
+      } catch (e) {
+        console.error("Failed to fetch package check assignments:", e);
+      }
     },
     [connection, connections, productRunSeries, findings, resolveCheckCategory],
   );
@@ -2647,6 +2699,123 @@ export default function App() {
     productRunSeries,
     fetchAssignments,
   ]);
+  const savePkgCheckAssignments = useCallback(async () => {
+    if (!selectedRun || connection !== "netweaver") return;
+    const seriesEntry = productRunSeries.find(
+      (s) => s.RunSeries.toUpperCase() === (selectedRun.series || "").toUpperCase(),
+    );
+    if (!seriesEntry) {
+      setPkgCheckSaveError("Could not determine ProductId for this run series.");
+      return;
+    }
+    const productId = seriesEntry.ProductId;
+    const runSeries = selectedRun.series || "";
+    setPkgCheckSaving(true);
+    setPkgCheckSaveError("");
+    setPkgCheckSaveSuccess("");
+    try {
+      const base = connections[connection].baseUrl;
+      const csrfR = await fetch(`${base}/Runs?$top=1`, {
+        method: "GET",
+        headers: { "X-CSRF-Token": "Fetch" },
+      });
+      const token =
+        csrfR.headers.get("x-csrf-token") ||
+        csrfR.headers.get("X-CSRF-Token") ||
+        "";
+      const errors: string[] = [];
+
+      // POST or PATCH current assignments
+      for (const [key, assignedUserId] of Object.entries(pkgCheckAssignments)) {
+        const [packageName, checkCategory] = key.split("|||");
+        if (!packageName || !checkCategory) continue;
+        const existing = pkgCheckAssignmentsBackend.find(
+          (r) => r.PackageName === packageName && r.CheckCategory === checkCategory,
+        );
+        if (existing) {
+          const r = await fetch(
+            `${base}/PackageCheckAssignments(ProductId='${productId}',RunSeries='${runSeries}',RunId='${selectedRun.ID}',PackageName='${encodeURIComponent(packageName)}',CheckCategory='${encodeURIComponent(checkCategory)}')`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
+              body: JSON.stringify({ AssignedUserId: assignedUserId }),
+            },
+          );
+          if (!r.ok) errors.push(`PATCH failed ${packageName}/${checkCategory}: HTTP ${r.status}`);
+        } else {
+          const r = await fetch(`${base}/PackageCheckAssignments`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
+            body: JSON.stringify({
+              ProductId: productId,
+              RunSeries: runSeries,
+              RunId: selectedRun.ID,
+              PackageName: packageName,
+              CheckCategory: checkCategory,
+              AssignedUserId: assignedUserId,
+            }),
+          });
+          if (!r.ok) {
+            errors.push(`POST failed ${packageName}/${checkCategory}: HTTP ${r.status}`);
+          } else {
+            // Create Jira tracking record
+            const assignmentKey = `${packageName}|||${checkCategory}`;
+            const ticketExists = jiraTickets.some(
+              (t) => t.AssignmentType === "PKG_CHECK" && t.AssignmentKey === assignmentKey,
+            );
+            if (!ticketExists) {
+              await fetch(`${base}/JiraTickets`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
+                body: JSON.stringify({
+                  ProductId: productId,
+                  RunSeries: runSeries,
+                  RunId: selectedRun.ID,
+                  AssignmentType: "PKG_CHECK",
+                  AssignmentKey: assignmentKey,
+                  JiraIssueKey: "",
+                  AssignedUserId: assignedUserId,
+                  RunDate: selectedRun.date || "",
+                }),
+              });
+            }
+          }
+        }
+      }
+
+      // DELETE removed assignments
+      for (const existing of pkgCheckAssignmentsBackend) {
+        const key = `${existing.PackageName}|||${existing.CheckCategory}`;
+        if (!pkgCheckAssignments[key]) {
+          const r = await fetch(
+            `${base}/PackageCheckAssignments(ProductId='${productId}',RunSeries='${runSeries}',RunId='${selectedRun.ID}',PackageName='${encodeURIComponent(existing.PackageName)}',CheckCategory='${encodeURIComponent(existing.CheckCategory)}')`,
+            { method: "DELETE", headers: { "X-CSRF-Token": token } },
+          );
+          if (!r.ok) errors.push(`DELETE failed ${existing.PackageName}/${existing.CheckCategory}: HTTP ${r.status}`);
+        }
+      }
+
+      if (errors.length > 0) setPkgCheckSaveError(errors.join(" | "));
+      else {
+        setPkgCheckSaveSuccess("Check-level package assignments saved successfully.");
+        await fetchAssignments(selectedRun);
+      }
+    } catch (e: any) {
+      setPkgCheckSaveError(e?.message || "Save failed.");
+    } finally {
+      setPkgCheckSaving(false);
+    }
+  }, [
+    selectedRun,
+    pkgCheckAssignments,
+    pkgCheckAssignmentsBackend,
+    jiraTickets,
+    connection,
+    connections,
+    productRunSeries,
+    fetchAssignments,
+  ]); // eslint-disable-line
+
   // ── Admin write helpers ─────────────────────────────────────────────────────
   const fetchCsrfToken = useCallback(async (): Promise<string> => {
     const base = connections[connection].baseUrl;
@@ -9716,129 +9885,205 @@ tbody tr:nth-child(even){background:#f8fafc;}tbody td{padding:7px 10px;border-bo
                       Click a package name to inspect · use dropdown to assign
                       developer
                     </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 6,
-                      }}
-                    >
-                      {packageRegistry.map((pkg, i) => (
-                        <div
-                          key={i}
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            padding: "9px 12px",
-                            background: packageAssignments[pkg.key]
-                              ? "#f0fdf4"
-                              : "#fff",
-                            borderRadius: 8,
-                            border: `1px solid ${packageAssignments[pkg.key] ? "#bbf7d0" : "#fde047"}`,
-                          }}
-                        >
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <span
-                              onClick={() => openPkgFindingsDrawer(pkg.key)}
-                              style={{
-                                fontSize: 12,
-                                fontWeight: 700,
-                                color: "#0a6ed1",
-                                cursor: "pointer",
-                                textDecoration: "underline",
-                                textDecorationStyle: "dotted",
-                              }}
-                            >
-                              {pkg.key}
-                            </span>
+                    {pkgCheckSaveError && (
+                      <div style={{ padding: "8px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, fontSize: 12, color: "#dc2626", marginBottom: 8 }}>
+                        ❌ {pkgCheckSaveError}
+                      </div>
+                    )}
+                    {pkgCheckSaveSuccess && (
+                      <div style={{ padding: "8px 12px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, fontSize: 12, color: "#15803d", marginBottom: 8 }}>
+                        ✅ {pkgCheckSaveSuccess}
+                      </div>
+                    )}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {packageRegistry.map((pkg, i) => {
+                        const isExpanded = expandedPkgForAssign === pkg.key;
+                        const checksInPkg = pkgCheckRegistry[pkg.key] || [];
+                        const assignedChecksInPkg = checksInPkg.filter(
+                          (c) => pkgCheckAssignments[`${pkg.key}|||${c.checkKey}`],
+                        ).length;
+                        const hasPkgAssign = !!packageAssignments[pkg.key];
+                        const hasCheckAssign = assignedChecksInPkg > 0;
+                        return (
+                          <div
+                            key={i}
+                            style={{
+                              borderRadius: 8,
+                              border: `1px solid ${hasPkgAssign || hasCheckAssign ? "#bbf7d0" : "#fde047"}`,
+                              overflow: "hidden",
+                            }}
+                          >
+                            {/* ── Package-level row ── */}
                             <div
                               style={{
                                 display: "flex",
-                                gap: 4,
-                                flexWrap: "wrap",
-                                marginTop: 3,
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                padding: "9px 12px",
+                                background: hasPkgAssign ? "#f0fdf4" : "#fff",
                               }}
                             >
-                              {pkg.p1 > 0 && (
+                              <div style={{ flex: 1, minWidth: 0 }}>
                                 <span
-                                  style={{
-                                    background: "#fee2e2",
-                                    color: "#dc2626",
-                                    borderRadius: 999,
-                                    padding: "1px 6px",
-                                    fontSize: 10,
-                                    fontWeight: 700,
-                                  }}
+                                  onClick={() => openPkgFindingsDrawer(pkg.key)}
+                                  style={{ fontSize: 12, fontWeight: 700, color: "#0a6ed1", cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted" }}
                                 >
-                                  P1:{pkg.p1}
+                                  {pkg.key}
                                 </span>
-                              )}
-                              {pkg.p2 > 0 && (
-                                <span
-                                  style={{
-                                    background: "#fef3c7",
-                                    color: "#d97706",
-                                    borderRadius: 999,
-                                    padding: "1px 6px",
-                                    fontSize: 10,
-                                    fontWeight: 700,
-                                  }}
-                                >
-                                  P2:{pkg.p2}
-                                </span>
-                              )}
-                              <span style={{ fontSize: 10, color: "#9ca3af" }}>
-                                {pkg.objectCount} objects
-                              </span>
+                                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
+                                  {pkg.p1 > 0 && <span style={{ background: "#fee2e2", color: "#dc2626", borderRadius: 999, padding: "1px 6px", fontSize: 10, fontWeight: 700 }}>P1:{pkg.p1}</span>}
+                                  {pkg.p2 > 0 && <span style={{ background: "#fef3c7", color: "#d97706", borderRadius: 999, padding: "1px 6px", fontSize: 10, fontWeight: 700 }}>P2:{pkg.p2}</span>}
+                                  <span style={{ fontSize: 10, color: "#9ca3af" }}>{pkg.objectCount} obj · {checksInPkg.length} checks</span>
+                                  {hasCheckAssign && (
+                                    <span style={{ fontSize: 10, color: "#15803d", fontWeight: 600 }}>
+                                      ✓ {assignedChecksInPkg}/{checksInPkg.length} checks assigned
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0, marginLeft: 8 }}>
+                                {/* Whole-package dropdown */}
+                                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                                  <span style={{ fontSize: 9, color: "#9ca3af", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.3 }}>Whole Package</span>
+                                  <select
+                                    value={packageAssignments[pkg.key] || ""}
+                                    onChange={(e) => {
+                                      const v = e.target.value;
+                                      setPackageAssignments((prev) => {
+                                        const n = { ...prev };
+                                        if (v) n[pkg.key] = v;
+                                        else delete n[pkg.key];
+                                        return n;
+                                      });
+                                    }}
+                                    style={{ padding: "4px 8px", borderRadius: 6, border: `1px solid ${hasPkgAssign ? "#22c55e" : "#fde047"}`, fontSize: 11, background: hasPkgAssign ? "#f0fdf4" : "white", color: hasPkgAssign ? "#15803d" : "#374151", fontWeight: hasPkgAssign ? 700 : 400, maxWidth: 150, cursor: "pointer" }}
+                                  >
+                                    <option value="">Unassigned</option>
+                                    {devProfiles.length > 0
+                                      ? devProfiles.map((p) => <option key={p.UserId} value={p.UserId}>{p.DisplayName}</option>)
+                                      : allKnownDevelopers.map((d) => <option key={d} value={d}>{d}</option>)}
+                                  </select>
+                                </div>
+                                {/* Drill-down toggle */}
+                                {checksInPkg.length > 0 && (
+                                  <button
+                                    onClick={() => setExpandedPkgForAssign(isExpanded ? null : pkg.key)}
+                                    title="Assign by check type within this package"
+                                    style={{
+                                      padding: "5px 10px",
+                                      borderRadius: 6,
+                                      border: `1px solid ${isExpanded ? "#0a6ed1" : "#d1d5db"}`,
+                                      background: isExpanded ? "#eff6ff" : "white",
+                                      color: isExpanded ? "#0a6ed1" : "#6b7280",
+                                      fontSize: 11,
+                                      fontWeight: 600,
+                                      cursor: "pointer",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                  >
+                                    {isExpanded ? "▲ By Check" : "▼ By Check"}
+                                  </button>
+                                )}
+                              </div>
                             </div>
+
+                            {/* ── Check-type drill-down panel ── */}
+                            {isExpanded && (
+                              <div style={{ background: "#f0f6ff", borderTop: "1px solid #bfdbfe", padding: "10px 12px 14px" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                                  <div>
+                                    <div style={{ fontSize: 11, fontWeight: 700, color: "#0a6ed1" }}>
+                                      🔍 Check-type assignments within <strong>{pkg.key}</strong>
+                                    </div>
+                                    <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
+                                      These are saved separately from the whole-package assignment above
+                                    </div>
+                                  </div>
+                                  <button
+                                    onClick={savePkgCheckAssignments}
+                                    disabled={pkgCheckSaving || !selectedRun}
+                                    style={{
+                                      padding: "5px 14px",
+                                      borderRadius: 7,
+                                      border: "none",
+                                      background: pkgCheckSaving || !selectedRun ? "#e5e7eb" : "#0a6ed1",
+                                      color: pkgCheckSaving || !selectedRun ? "#9ca3af" : "white",
+                                      fontSize: 11,
+                                      fontWeight: 700,
+                                      cursor: pkgCheckSaving || !selectedRun ? "default" : "pointer",
+                                      flexShrink: 0,
+                                    }}
+                                  >
+                                    {pkgCheckSaving ? "Saving..." : "💾 Save"}
+                                  </button>
+                                </div>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                                  {checksInPkg.map((chk, j) => {
+                                    const ckKey = `${pkg.key}|||${chk.checkKey}`;
+                                    const assigned = pkgCheckAssignments[ckKey];
+                                    return (
+                                      <div
+                                        key={j}
+                                        style={{
+                                          display: "flex",
+                                          justifyContent: "space-between",
+                                          alignItems: "center",
+                                          padding: "7px 10px",
+                                          background: assigned ? "#f0fdf4" : "white",
+                                          borderRadius: 6,
+                                          border: `1px solid ${assigned ? "#bbf7d0" : "#dbeafe"}`,
+                                        }}
+                                      >
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                          <div style={{ fontSize: 11, fontWeight: 600, color: "#374151", wordBreak: "break-all" }}>
+                                            {chk.checkCat || chk.checkKey}
+                                          </div>
+                                          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 2 }}>
+                                            {chk.p1 > 0 && <span style={{ background: "#fee2e2", color: "#dc2626", borderRadius: 999, padding: "1px 5px", fontSize: 9, fontWeight: 700 }}>P1:{chk.p1}</span>}
+                                            {chk.p2 > 0 && <span style={{ background: "#fef3c7", color: "#d97706", borderRadius: 999, padding: "1px 5px", fontSize: 9, fontWeight: 700 }}>P2:{chk.p2}</span>}
+                                            {chk.p3 > 0 && <span style={{ background: "#dbeafe", color: "#2563eb", borderRadius: 999, padding: "1px 5px", fontSize: 9, fontWeight: 700 }}>P3:{chk.p3}</span>}
+                                            <span style={{ fontSize: 9, color: "#9ca3af" }}>{chk.objectCount} obj · {chk.total} findings</span>
+                                          </div>
+                                        </div>
+                                        <select
+                                          value={assigned || ""}
+                                          onChange={(e) => {
+                                            const v = e.target.value;
+                                            setPkgCheckAssignments((prev) => {
+                                              const n = { ...prev };
+                                              if (v) n[ckKey] = v;
+                                              else delete n[ckKey];
+                                              return n;
+                                            });
+                                          }}
+                                          style={{
+                                            padding: "3px 7px",
+                                            borderRadius: 5,
+                                            border: `1px solid ${assigned ? "#22c55e" : "#93c5fd"}`,
+                                            fontSize: 10,
+                                            background: assigned ? "#f0fdf4" : "white",
+                                            color: assigned ? "#15803d" : "#374151",
+                                            fontWeight: assigned ? 700 : 400,
+                                            maxWidth: 150,
+                                            cursor: "pointer",
+                                            flexShrink: 0,
+                                            marginLeft: 8,
+                                          }}
+                                        >
+                                          <option value="">Unassigned</option>
+                                          {devProfiles.length > 0
+                                            ? devProfiles.map((p) => <option key={p.UserId} value={p.UserId}>{p.DisplayName}</option>)
+                                            : allKnownDevelopers.map((d) => <option key={d} value={d}>{d}</option>)}
+                                        </select>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
                           </div>
-                          <select
-                            value={packageAssignments[pkg.key] || ""}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              setPackageAssignments((prev) => {
-                                const n = { ...prev };
-                                if (v) n[pkg.key] = v;
-                                else delete n[pkg.key];
-                                return n;
-                              });
-                            }}
-                            style={{
-                              padding: "4px 8px",
-                              borderRadius: 6,
-                              border: `1px solid ${packageAssignments[pkg.key] ? "#22c55e" : "#fde047"}`,
-                              fontSize: 11,
-                              background: packageAssignments[pkg.key]
-                                ? "#f0fdf4"
-                                : "white",
-                              color: packageAssignments[pkg.key]
-                                ? "#15803d"
-                                : "#374151",
-                              fontWeight: packageAssignments[pkg.key]
-                                ? 700
-                                : 400,
-                              maxWidth: 160,
-                              cursor: "pointer",
-                              flexShrink: 0,
-                              marginLeft: 10,
-                            }}
-                          >
-                            <option value="">Unassigned</option>
-                            {devProfiles.length > 0
-                              ? devProfiles.map((p) => (
-                                  <option key={p.UserId} value={p.UserId}>
-                                    {p.DisplayName}
-                                  </option>
-                                ))
-                              : allKnownDevelopers.map((d) => (
-                                  <option key={d} value={d}>
-                                    {d}
-                                  </option>
-                                ))}
-                          </select>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                   {packageWorkload.length > 0 && (
